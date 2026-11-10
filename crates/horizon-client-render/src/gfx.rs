@@ -1363,38 +1363,42 @@ fn is_software(kind: wgpu::DeviceType) -> bool {
 /// PowerVR GE8320's Android driver has a history of Vulkan texture and compute
 /// failures. Keep Vulkan available, but avoid Horizon's optional GPU paths that
 /// are not required for the ordinary single-pass renderer.
-fn is_power_vr_ge8320(info: &wgpu::AdapterInfo) -> bool {
-    let identity = format!("{} {} {}", info.name, info.driver, info.driver_info).to_ascii_lowercase();
-    identity.contains("ge8320")
+fn is_power_vr_ge8320(name: &str, driver: &str, driver_info: &str) -> bool {
+    format!("{name} {driver} {driver_info}")
+        .to_ascii_lowercase()
+        .contains("ge8320")
 }
 
 #[cfg(test)]
 mod a04_gpu_compatibility_tests {
     use super::is_power_vr_ge8320;
 
-    fn detected(name: &str, driver: &str, driver_info: &str) -> bool {
-        let info = wgpu::AdapterInfo {
-            name: name.into(),
-            vendor: 0,
-            device: 0,
-            device_type: wgpu::DeviceType::IntegratedGpu,
-            driver: driver.into(),
-            driver_info: driver_info.into(),
-            backend: wgpu::Backend::Vulkan,
-        };
-        is_power_vr_ge8320(&info)
-    }
-
     #[test]
     fn recognizes_ge8320_from_adapter_or_driver_identity() {
-        assert!(detected("PowerVR GE8320", "Imagination", "Android Vulkan"));
-        assert!(detected("PowerVR Rogue", "Unknown", "GE8320 driver"));
+        assert!(is_power_vr_ge8320(
+            "PowerVR GE8320",
+            "Imagination",
+            "Android Vulkan"
+        ));
+        assert!(is_power_vr_ge8320(
+            "PowerVR Rogue",
+            "Unknown",
+            "GE8320 driver"
+        ));
     }
 
     #[test]
     fn does_not_match_other_mobile_gpus_or_nearby_models() {
-        assert!(!detected("Mali-G52", "ARM", "Android Vulkan"));
-        assert!(!detected("PowerVR GE8322", "Imagination", "Android Vulkan"));
+        assert!(!is_power_vr_ge8320(
+            "Mali-G52",
+            "ARM",
+            "Android Vulkan"
+        ));
+        assert!(!is_power_vr_ge8320(
+            "PowerVR GE8322",
+            "Imagination",
+            "Android Vulkan"
+        ));
     }
 }
 /// A device and what it came from.
@@ -1622,7 +1626,7 @@ async fn open_backend(
     // (`MC_GL_KHR_shader_subgroup_*`); storage buffers in vertex shaders, clearing and
     // atomics on images: their buffers and images.
     let mobile = cfg!(target_os = "android");
-    let power_vr_ge8320 = mobile && is_power_vr_ge8320(&info);
+    let power_vr_ge8320 = mobile && is_power_vr_ge8320(&info.name, &info.driver, &info.driver_info);
     let compatibility = crate::android_runtime::compatibility() || power_vr_ge8320;
     if power_vr_ge8320 {
         log::warn!(
@@ -2208,7 +2212,7 @@ impl Renderer {
         let tri = wgpu::PrimitiveTopology::TriangleList;
         let adapter_info = adapter.get_info();
         let power_vr_ge8320 =
-            cfg!(target_os = "android") && is_power_vr_ge8320(&adapter_info);
+            cfg!(target_os = "android") && is_power_vr_ge8320(&adapter_info.name, &adapter_info.driver, &adapter_info.driver_info);
         if power_vr_ge8320 {
             log::warn!(
                 "Horizon renderer: disabling optional split terrain, flat batching and GPU sprite compute on PowerVR GE8320"
