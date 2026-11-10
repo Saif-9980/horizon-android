@@ -2308,6 +2308,10 @@ impl super::Instance {
                 super::Workarounds::FORCE_FILL_BUFFER_WITH_SIZE_GREATER_4096_ALIGNED_OFFSET_16,
                 phd_capabilities.properties.vendor_id == db::nvidia::VENDOR,
             );
+            workarounds.set(
+                super::Workarounds::SERIALIZE_SHADER_COMPILATION,
+                should_serialize_shader_compilation(info.vendor, &info.name),
+            );
         };
 
         if let Some(driver) = phd_capabilities.driver {
@@ -2933,6 +2937,7 @@ impl super::Adapter {
             sampler_cache: Mutex::new(super::sampler::SamplerCache::new(
                 self.private_caps.maximum_samplers,
             )),
+            shader_compilation: Mutex::new(()),
             memory_allocations_counter: Default::default(),
 
             texture_identity_factory: super::ResourceIdentityFactory::new(),
@@ -3551,4 +3556,34 @@ fn query_cooperative_matrix_properties(
         result.len()
     );
     result
+}
+
+
+/// PowerVR Rogue GPUs (including GE8320) have Android drivers whose shader
+/// compiler can abort when Vulkan shader modules or pipelines are compiled
+/// concurrently. 0x1010 is Imagination Technologies' Vulkan vendor ID.
+fn should_serialize_shader_compilation(vendor_id: u32, device_name: &str) -> bool {
+    const IMGTEC_VENDOR_ID: u32 = 0x1010;
+    let name = device_name.to_ascii_lowercase();
+    vendor_id == IMGTEC_VENDOR_ID
+        && (name.contains("rogue") || name.contains("ge8320") || name.contains("bxm-8-256"))
+}
+
+#[cfg(test)]
+mod powervr_shader_serialization_tests {
+    use super::should_serialize_shader_compilation;
+
+    #[test]
+    fn serializes_affected_power_vr_families() {
+        assert!(should_serialize_shader_compilation(0x1010, "PowerVR Rogue GE8320"));
+        assert!(should_serialize_shader_compilation(0x1010, "PowerVR GE8320"));
+        assert!(should_serialize_shader_compilation(0x1010, "PowerVR BXM-8-256"));
+    }
+
+    #[test]
+    fn leaves_other_vendors_and_unaffected_models_parallel() {
+        assert!(!should_serialize_shader_compilation(0x1002, "PowerVR Rogue GE8320"));
+        assert!(!should_serialize_shader_compilation(0x1010, "PowerVR DXT-48-1536"));
+        assert!(!should_serialize_shader_compilation(0x1010, "PowerVR BXM-4-64"));
+    }
 }
