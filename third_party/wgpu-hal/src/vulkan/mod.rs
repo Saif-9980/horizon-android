@@ -461,6 +461,9 @@ bitflags::bitflags!(
         /// As such, we need to make sure all calls to vkCmdFillBuffer are aligned to 16 bytes
         /// if they cover a range of 4096 bytes or more.
         const FORCE_FILL_BUFFER_WITH_SIZE_GREATER_4096_ALIGNED_OFFSET_16 = 0x4;
+        /// PowerVR Rogue shader compilers can fault when multiple threads create
+        /// shader modules or pipelines concurrently. Serialize compilation per device.
+        const SERIALIZE_SHADER_COMPILATION = 0x8;
     }
 );
 
@@ -519,6 +522,8 @@ struct DeviceShared {
     features: wgt::Features,
     render_passes: Mutex<FastHashMap<RenderPassKey, vk::RenderPass>>,
     sampler_cache: Mutex<sampler::SamplerCache>,
+    /// Held across shader-module and pipeline creation on affected GPU drivers.
+    shader_compilation: Mutex<()>,
     memory_allocations_counter: InternalCounter,
 
     /// Because we have cached framebuffers which are not deleted from until
