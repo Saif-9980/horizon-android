@@ -16,6 +16,13 @@ use super::{conv, descriptor::DescriptorCounts, RawTlasInstance};
 use crate::TlasInstance;
 
 impl super::DeviceShared {
+    /// Locks shader-module and pipeline creation on drivers that cannot compile concurrently.
+    fn shader_compilation_guard(&self) -> Option<parking_lot::MutexGuard<'_, ()>> {
+        self.workarounds
+            .contains(super::Workarounds::SERIALIZE_SHADER_COMPILATION)
+            .then(|| self.shader_compilation.lock())
+    }
+
     /// Set the name of `object` to `name`.
     ///
     /// If `name` contains an interior null byte, then the name set will be truncated to that byte.
@@ -678,6 +685,7 @@ impl super::Device {
 
         let raw = unsafe {
             profiling::scope!("vkCreateShaderModule");
+            let _serialized = self.shared.shader_compilation_guard();
             self.shared
                 .raw
                 .create_shader_module(&vk_info, None)
@@ -2168,6 +2176,7 @@ impl crate::Device for super::Device {
 
         let mut raw_vec = {
             profiling::scope!("vkCreateGraphicsPipelines");
+            let _serialized = self.shared.shader_compilation_guard();
             unsafe {
                 self.shared
                     .raw
@@ -2251,6 +2260,7 @@ impl crate::Device for super::Device {
 
         let mut raw_vec = {
             profiling::scope!("vkCreateComputePipelines");
+            let _serialized = self.shared.shader_compilation_guard();
             unsafe {
                 self.shared
                     .raw
@@ -2387,15 +2397,18 @@ impl crate::Device for super::Device {
             .ray_tracing_pipelines
             .as_ref()
             .unwrap();
-        let pipelines = unsafe {
-            fns.create_ray_tracing_pipelines(
-                vk::DeferredOperationKHR::null(),
-                pipeline_cache,
-                &create_infos,
-                None,
-            )
-            .map_err(|(_, e)| super::map_pipeline_err(e))
-        }?;
+        let pipelines = {
+            let _serialized = self.shared.shader_compilation_guard();
+            unsafe {
+                fns.create_ray_tracing_pipelines(
+                    vk::DeferredOperationKHR::null(),
+                    pipeline_cache,
+                    &create_infos,
+                    None,
+                )
+                .map_err(|(_, e)| super::map_pipeline_err(e))
+            }?
+        };
 
         if let Some(raw_module) = compiled_ray_gen.temp_raw_module {
             unsafe { self.shared.raw.destroy_shader_module(raw_module, None) };
